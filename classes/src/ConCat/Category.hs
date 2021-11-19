@@ -50,7 +50,7 @@ import Control.Arrow (Kleisli(..),arr)
 import qualified Control.Arrow as A
 import Control.Monad ((<=<))
 import Data.Typeable (Typeable)
-import GHC.Exts (Coercible,coerce)
+import GHC.Exts (Coercible)
 import qualified GHC.Exts as X
 import Data.Type.Equality ((:~:)(..))
 import qualified Data.Type.Equality as Eq
@@ -64,6 +64,7 @@ import GHC.Generics (U1(..),Par1(..),(:*:)(..),(:.:)(..))
 import GHC.TypeLits
 import Control.Monad.Fix (MonadFix)
 -- import Data.Proxy (Proxy)
+import Unsafe.Coerce (unsafeCoerce)
 
 import Data.Pointed
 import Data.Key (Zip(..))
@@ -1879,8 +1880,11 @@ class (
       ) => CoerceCat k a b where
   coerceC :: a `k` b
 
-instance Coercible a b => CoerceCat (->) a b where
-  coerceC = coerce
+-- | This instance is a bit odd, but the intent is to ensure that the types
+--   /are/ coercible, but to then use `unsafeCoerce` to avoid needing to have
+--   the newtype constructors in scope.
+instance CoerceCat (->) a b where
+  coerceC = unsafeCoerce
 
 instance CoerceCat U2 a b where
   coerceC = U2
