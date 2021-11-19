@@ -17,10 +17,10 @@
 -- |
 -- Module      :  ConCat.Rep
 -- Copyright   :  (c) 2016 Conal Elliott
--- 
+--
 -- Maintainer  :  conal@conal.net
 -- Stability   :  experimental
--- 
+--
 -- Convert to and from standard representations.
 -- TODO: Can I replace HasRep with Generic or Newtype?
 ----------------------------------------------------------------------
@@ -162,11 +162,11 @@ WrapRep(Parity,Bool,Parity)
 
 -- Experimental treatment of Maybe
 instance HasRep (Maybe a) where
-  type Rep (Maybe a) = Bool :* a
-  repr (Just a) = (True,a)
-  repr Nothing  = (False, bottom)
-  abst (True,a ) = Just a
-  abst (False,_) = Nothing 
+  type Rep (Maybe a) = Either () a
+  repr Nothing = Left ()
+  repr (Just a) = Right a
+  abst (Left _) = Nothing
+  abst (Right a) = Just a
   INLINES
 
 -- TODO: LambdaCCC.Prim has an BottomP primitive. If the error ever occurs,
@@ -184,7 +184,7 @@ instance HasRep (Maybe a) where
 --   abst (True ,(_,b)) = Right b
 
 -- -- TODO: Redefine `Maybe` representation as sum:
--- 
+--
 -- type instance Rep (Maybe a) = Unit :+ a
 -- ...
 
