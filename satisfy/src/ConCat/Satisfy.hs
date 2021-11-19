@@ -13,7 +13,7 @@ module ConCat.Satisfy where
 
 -- | Magic function to satisfy a constraint. Requires -fplugin=ConCat.Satisfy.Plugin to work.
 satisfy :: forall c z. (c => z) -> z
-satisfy = error "satisfy: Use -fplugin=ConCat.Satisfy.Plugin"
+satisfy _ = error "satisfy: Use -fplugin=ConCat.Satisfy.Plugin"
 {-# NOINLINE [0] satisfy #-}
 
 satisfy1 :: forall c f a. (c f => f a) -> f a
