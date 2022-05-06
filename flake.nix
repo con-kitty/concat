@@ -14,7 +14,8 @@
         "concat-known" = self.callCabal2nix "concat-known" ./known { };
         #"concat-hardware" = self.callCabal2nix "concat-hardware" ./hardware { };
         "concat-graphics" = self.callCabal2nix "concat-graphics" ./graphics { };
-        "concat-examples" = self.callCabal2nix "concat-examples" ./examples { };
+        "concat-examples" = pkgs.haskell.lib.dontHaddock
+          (self.callCabal2nix "concat-examples" ./examples { });
       };
 
       newHaskellPackages =
