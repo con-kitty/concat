@@ -1815,7 +1815,7 @@ class BottomCat k a b where
 --   bottomC = bottomC &&& bottomC
 
 instance (BottomCat k a b, ClosedCat k, Ok4 k z b a (z -> b)) => BottomCat k a (z -> b) where
-  bottomC = curry (bottomC . exl) <+ okProd @k @a @ z
+  bottomC = curry (bottomC . exl) <+ okProd @k @a @z
 
 instance BottomCat (->) a b where bottomC = error "bottomC for (->) evaluated"
 
@@ -2029,7 +2029,7 @@ instance (OkFunctor k h, OkFunctor k' h)
       => OkFunctor (k :**: k') h where
   okFunctor = inForkCon (okFunctor @k *** okFunctor @k')
 
-class (Functor h, OkFunctor k h) => FunctorCat k h where
+class OkFunctor k h => FunctorCat k h where
   fmapC :: Ok2 k a b => (a `k` b) -> (h a `k` h b)
   unzipC :: forall a b. Ok2 k a b => h (a :* b) `k` (h a :* h b)
 #if 0
@@ -2075,7 +2075,7 @@ class ({- Pointed h, -} OkFunctor k h, Ok k a) => PointedCat k h a where
 -- class (Ok k a, Num a) => SumCat k h a where
 --   sumC :: h a `k` a
 
-class (Ok k a, Additive a) => AddCat k h a where
+class Ok k a => AddCat k h a where
   sumAC :: h a `k` a
 
 -- class IxSummable n => IxSummableCat k n where
