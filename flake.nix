@@ -9,17 +9,32 @@
       let
         haskellLib = (import nixpkgs { inherit system; }).haskell.lib;
 
+        excludedPackages = [ "concat-hardware" ];
+        noHaddockPackages =
+          [ "concat-examples" "concat-inline" "concat-plugin" ];
+        # need display, graphviz for testing. disable test for now.
+        noCheckPackages = [ "concat-graphics" "concat-plugin" ];
+
         parseCabalProject = import ./parse-cabal-project.nix;
-        concatPackages = let
-          excluded = [ "concat-hardware" ];
-          parsed = parseCabalProject ./cabal.project;
-        in builtins.filter ({ name, ... }: !(builtins.elem name excluded))
-        parsed;
+        concatPackages = let parsed = parseCabalProject ./cabal.project;
+        in builtins.filter
+        ({ name, ... }: !(builtins.elem name excludedPackages)) parsed;
         concatPackageNames = builtins.map ({ name, ... }: name) concatPackages;
+
         haskellOverlay = self: super:
           builtins.listToAttrs (builtins.map ({ name, path }: {
             inherit name;
-            value = self.callCabal2nix name (./. + "/${path}") { };
+            value = let
+              p = self.callCabal2nix name (./. + "/${path}") { };
+              p1 = if builtins.elem name noHaddockPackages then
+                haskellLib.dontHaddock p
+              else
+                p;
+              p2 = if builtins.elem name noCheckPackages then
+                haskellLib.dontCheck p1
+              else
+                p1;
+            in p2;
           }) concatPackages);
 
         # see these issues and discussions:
@@ -35,6 +50,42 @@
           });
         };
       in {
+        # This package set is only useful for CI build test.
+        # In practice, users will create a development environment composed by overlays.
+        packages = let
+          packagesOnGHC = ghcVer:
+            let
+              overlayGHC = final: prev: {
+                haskellPackages = prev.haskell.packages.${ghcVer};
+              };
+
+              newPkgs = import nixpkgs {
+                overlays = [ overlayGHC fullOverlay ];
+                inherit system;
+              };
+
+              individualPackages = builtins.listToAttrs (builtins.map
+                ({ name, ... }: {
+                  name = ghcVer + "_" + name;
+                  value = builtins.getAttr name newPkgs.haskellPackages;
+                }) concatPackages);
+
+              allEnv = let
+                hsenv = newPkgs.haskellPackages.ghcWithPackages (p:
+                  let
+                    deps =
+                      builtins.map ({ name, ... }: p.${name}) concatPackages;
+                  in deps);
+              in newPkgs.buildEnv {
+                name = "all-packages";
+                paths = [ hsenv ];
+              };
+            in individualPackages // { "${ghcVer}_all" = allEnv; };
+
+        in packagesOnGHC "ghc8107" // packagesOnGHC "ghc884"
+        // packagesOnGHC "ghc901" // packagesOnGHC "ghc921"
+        // packagesOnGHC "ghcHEAD";
+
         overlay = fullOverlay;
 
         devShells = let
