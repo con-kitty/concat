@@ -45,9 +45,6 @@
               };
 
               newPkgs = import nixpkgs {
-                # Here we use the full overlays from this flake, but the categorifier-*
-                # packages will not be provided in the shell. The overlay is only used
-                # to extract dependencies.
                 overlays = [ overlayGHC fullOverlay ];
                 inherit system;
               };
