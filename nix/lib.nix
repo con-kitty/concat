@@ -25,6 +25,15 @@
 in {
   inherit parseCabalProject;
 
+  # A “Haskell overlay” is a function that takes the usual overlay arguments,
+  # but also takes a GHC version and then Haskell-specific final and prev
+  # arguments (suitable for passing to `haskell.packages.${ghc}.extend`).
+  #
+  # This function takes a (final: ghc: AttrSet of Haskell packages) and returns
+  # a Haskell overlay.
+  haskellOverlay = packages: final: prev: ghcVer: hfinal: hprev:
+    packages final ghcVer;
+
   # Produces a devShell for each supported GHC version.
   mkDevShells = pkgs: ghcVersions: packages:
     builtins.listToAttrs
@@ -75,7 +84,7 @@ in {
   #
   # `haskellOverlay` should be a function:
   #
-  #     ghcVer: finalHaskPkgs: prevHaskPkgs: AttrSet
+  #     final: prev: ghcVer: finalHaskPkgs: prevHaskPkgs: AttrSet
   overlayHaskellPackages = ghcVersions: haskellOverlay: final: prev: {
     haskell =
       prev.haskell
@@ -86,17 +95,9 @@ in {
           (builtins.map
             (ghcVer: {
               name = ghcVer;
-              value = prev.haskell.packages.${ghcVer}.override (old: {
-                # see these issues and discussions:
-                # - https://github.com/NixOS/nixpkgs/issues/16394
-                # - https://github.com/NixOS/nixpkgs/issues/25887
-                # - https://github.com/NixOS/nixpkgs/issues/26561
-                # - https://discourse.nixos.org/t/nix-haskell-development-2020/6170
-                overrides =
-                  nixpkgs.lib.composeExtensions
-                  (old.overrides or (_: _: {}))
-                  (haskellOverlay ghcVer);
-              });
+              value =
+                prev.haskell.packages.${ghcVer}.extend
+                (haskellOverlay final prev ghcVer);
             })
             ghcVersions);
       };

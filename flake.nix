@@ -6,7 +6,7 @@
     flake-utils,
     nixpkgs,
   }: let
-    supportedGhcVersions = ["ghc884" "ghc8107" "ghc902" "ghc924" "ghcHEAD"];
+    availableGhcVersions = ["ghc884" "ghc8107" "ghc902" "ghc924" "ghcHEAD"];
     excludedPackages = ["concat-hardware"];
     noHaddockPackages = ["concat-examples" "concat-inline" "concat-plugin"];
     # need display, graphviz for testing. disable test for now.
@@ -30,11 +30,14 @@
       (self.lib.cabalProject2nix ./cabal.project pkgs ghcVer);
   in
     {
-      overlays.default = final:
-        self.lib.overlayHaskellPackages
-        supportedGhcVersions
-        (ghcVer: hfinal: hprev: cabalPackages final ghcVer)
-        final;
+      overlays = {
+        default =
+          self.lib.overlayHaskellPackages
+          availableGhcVersions
+          self.overlays.haskell;
+
+        haskell = self.lib.haskellOverlay cabalPackages;
+      };
 
       ### TODO: Pull this into its own flake, for use across Haskell projects.
       lib = import ./nix/lib.nix {inherit nixpkgs;};
@@ -46,9 +49,14 @@
         #     to find other packages in this flake as dependencies.
         overlays = [self.overlays.default];
       };
+
+      supportedGhcVersions =
+        if system == flake-utils.lib.system.aarch64-darwin
+        then nixpkgs.lib.remove "ghc884" availableGhcVersions
+        else availableGhcVersions;
     in {
-      # This package set is only useful for CI build test.
-      # In practice, users will create a development environment composed by overlays.
+      # This package set is only useful for CI build test. In practice, users
+      # will create a development environment composed by overlays.
       packages =
         {default = self.packages.${system}.ghc902_all;}
         // self.lib.mkPackages pkgs supportedGhcVersions cabalPackages;
