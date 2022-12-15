@@ -8,90 +8,107 @@
     self,
     nixpkgs,
     flake-utils,
-  }:
-    flake-utils.lib.eachSystem flake-utils.lib.allSystems (system: let
-      pkgs = import nixpkgs {inherit system;};
+  }: let
+    supportedGhcVersions = ["ghc884" "ghc8107" "ghc902" "ghc924" "ghcHEAD"];
+    excludedPackages = ["concat-hardware"];
+    noHaddockPackages = ["concat-examples" "concat-inline" "concat-plugin"];
+    # need display, graphviz for testing. disable test for now.
+    noCheckPackages = ["concat-graphics" "concat-plugin"];
+
+    cabalPackages =
+      builtins.filter
+      ({name, ...}: !(builtins.elem name excludedPackages))
+      (self.lib.parseCabalProject ./cabal.project);
+    nixPackages = pkgs: ghcVer: let
       haskellLib = pkgs.haskell.lib;
+    in
+      builtins.listToAttrs
+      (builtins.map
+        ({
+          name,
+          path,
+        }: {
+          inherit name;
+          value = let
+            p = pkgs.haskell.packages.${ghcVer}.callCabal2nix name (./. + "/${path}") {};
+            p1 =
+              if builtins.elem name noHaddockPackages
+              then haskellLib.dontHaddock p
+              else p;
+          in
+            if builtins.elem name noCheckPackages
+            then haskellLib.dontCheck p1
+            else p1;
+        })
+        cabalPackages);
+  in
+    {
+      overlays.default = final:
+        self.lib.overlayHaskellPackages
+        supportedGhcVersions
+        (ghcVer: hfinal: hprev: nixPackages final ghcVer)
+        final;
 
-      excludedPackages = ["concat-hardware"];
-      noHaddockPackages = ["concat-examples" "concat-inline" "concat-plugin"];
-      # need display, graphviz for testing. disable test for now.
-      noCheckPackages = ["concat-graphics" "concat-plugin"];
+      ### TODO: Pull this into its own flake, for use across Haskell projects.
+      lib = {
+        overlayHaskellPackages = ghcVersions: haskellOverlay: final: prev: {
+          haskell =
+            prev.haskell
+            // {
+              packages =
+                prev.haskell.packages
+                // builtins.zipAttrsWith
+                (name: values: builtins.head values)
+                (builtins.map
+                  (ghcVer: {
+                    "${ghcVer}" = prev.haskell.packages.${ghcVer}.override (old: {
+                      # see these issues and discussions:
+                      # - https://github.com/NixOS/nixpkgs/issues/16394
+                      # - https://github.com/NixOS/nixpkgs/issues/25887
+                      # - https://github.com/NixOS/nixpkgs/issues/26561
+                      # - https://discourse.nixos.org/t/nix-haskell-development-2020/6170
+                      overrides =
+                        final.lib.composeExtensions
+                        (old.overrides or (_: _: {}))
+                        (haskellOverlay ghcVer);
+                    });
+                  })
+                  ghcVersions);
+            };
+        };
 
-      parseCabalProject = import ./parse-cabal-project.nix;
-      concatPackages = let
-        parsed = parseCabalProject ./cabal.project;
-      in
-        builtins.filter
-        ({name, ...}: !(builtins.elem name excludedPackages))
-        parsed;
-      concatPackageNames = builtins.map ({name, ...}: name) concatPackages;
-
-      haskellOverlay = self: super:
-        builtins.listToAttrs (builtins.map ({
-            name,
-            path,
-          }: {
-            inherit name;
-            value = let
-              p = self.callCabal2nix name (./. + "/${path}") {};
-              p1 =
-                if builtins.elem name noHaddockPackages
-                then haskellLib.dontHaddock p
-                else p;
-              p2 =
-                if builtins.elem name noCheckPackages
-                then haskellLib.dontCheck p1
-                else p1;
-            in
-              p2;
-          })
-          concatPackages);
-
-      # see these issues and discussions:
-      # - https://github.com/NixOS/nixpkgs/issues/16394
-      # - https://github.com/NixOS/nixpkgs/issues/25887
-      # - https://github.com/NixOS/nixpkgs/issues/26561
-      # - https://discourse.nixos.org/t/nix-haskell-development-2020/6170
-      fullOverlay = final: prev: {
-        haskellPackages = prev.haskellPackages.override (old: {
-          overrides =
-            final.lib.composeExtensions (old.overrides or (_: _: {}))
-            haskellOverlay;
-        });
+        parseCabalProject = import ./parse-cabal-project.nix;
       };
+    }
+    // flake-utils.lib.eachSystem flake-utils.lib.allSystems (system: let
+      pkgs = import nixpkgs {
+        inherit system;
+        # NB: This uses `self.overlays.default` instead of `dependencies`
+        #     because packages need to be able to find other packages in this
+        #     flake as dependencies.
+        overlays = [self.overlays.default];
+      };
+
+      systemPackages = nixPackages pkgs;
     in {
       # This package set is only useful for CI build test.
       # In practice, users will create a development environment composed by overlays.
       packages = let
         packagesOnGHC = ghcVer: let
-          overlayGHC = final: prev: {
-            haskellPackages = prev.haskell.packages.${ghcVer};
+          ghcPackages = systemPackages ghcVer;
+
+          individualPackages =
+            pkgs.lib.concatMapAttrs
+            (name: value: {"${ghcVer}_${name}" = value;})
+            ghcPackages;
+
+          allEnv = pkgs.buildEnv {
+            name = "all-packages";
+            paths = [
+              (pkgs.haskell.packages.${ghcVer}.ghcWithPackages
+                (_: builtins.attrValues ghcPackages))
+            ];
           };
-
-          newPkgs = import nixpkgs {
-            overlays = [overlayGHC fullOverlay];
-            inherit system;
-          };
-
-          individualPackages = builtins.listToAttrs (builtins.map
-            ({name, ...}: {
-              name = ghcVer + "_" + name;
-              value = builtins.getAttr name newPkgs.haskellPackages;
-            })
-            concatPackages);
-
-          allEnv = let
-            hsenv = newPkgs.haskellPackages.ghcWithPackages (p: let
-              deps =
-                builtins.map ({name, ...}: p.${name}) concatPackages;
-            in
-              deps);
-          in
-            newPkgs.buildEnv {
-              name = "all-packages";
-              paths = [hsenv];
-            };
         in
           individualPackages // {"${ghcVer}_all" = allEnv;};
       in
@@ -102,24 +119,13 @@
         // packagesOnGHC "ghc924"
         // packagesOnGHC "ghcHEAD";
 
-      overlay = fullOverlay;
-
       devShells = let
-        mkDevShell = ghcVer: let
-          overlayGHC = final: prev: {
-            haskellPackages = prev.haskell.packages.${ghcVer};
-          };
-
-          newPkgs = import nixpkgs {
-            overlays = [overlayGHC fullOverlay];
-            inherit system;
-          };
-        in
-          newPkgs.haskellPackages.shellFor {
-            packages = ps: builtins.map (name: ps.${name}) concatPackageNames;
-            buildInputs = [
-              newPkgs.haskellPackages.cabal-install
-              newPkgs.haskell-language-server
+        mkDevShell = ghcVer:
+          pkgs.haskell.packages.${ghcVer}.shellFor {
+            packages = _: builtins.attrValues (systemPackages ghcVer);
+            nativeBuildInputs = [
+              pkgs.haskell-language-server
+              pkgs.haskell.packages.${ghcVer}.cabal-install
             ];
             withHoogle = false;
           };
