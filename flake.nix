@@ -48,6 +48,46 @@
 
       ### TODO: Pull this into its own flake, for use across Haskell projects.
       lib = {
+        mkDevShells = pkgs: ghcVersions: packages:
+          builtins.listToAttrs
+          (builtins.map
+            (ghcVer: {
+              name = ghcVer;
+              value = pkgs.haskell.packages.${ghcVer}.shellFor {
+                packages = _: builtins.attrValues (packages ghcVer);
+                nativeBuildInputs = [
+                  pkgs.haskell-language-server
+                  pkgs.haskell.packages.${ghcVer}.cabal-install
+                ];
+                withHoogle = false;
+              };
+            })
+            ghcVersions);
+
+        mkPackages = pkgs: ghcVersions: packages:
+          nixpkgs.lib.foldr
+          (a: b: a // b)
+          {}
+          (builtins.map
+            (ghcVer: let
+              ghcPackages = packages ghcVer;
+
+              individualPackages =
+                nixpkgs.lib.concatMapAttrs
+                (name: value: {"${ghcVer}_${name}" = value;})
+                ghcPackages;
+
+              allEnv = pkgs.buildEnv {
+                name = "all-packages";
+                paths = [
+                  (pkgs.haskell.packages.${ghcVer}.ghcWithPackages
+                    (_: builtins.attrValues ghcPackages))
+                ];
+              };
+            in
+              individualPackages // {"${ghcVer}_all" = allEnv;})
+            ghcVersions);
+
         overlayHaskellPackages = ghcVersions: haskellOverlay: final: prev: {
           haskell =
             prev.haskell
@@ -65,7 +105,7 @@
                       # - https://github.com/NixOS/nixpkgs/issues/26561
                       # - https://discourse.nixos.org/t/nix-haskell-development-2020/6170
                       overrides =
-                        final.lib.composeExtensions
+                        nixpkgs.lib.composeExtensions
                         (old.overrides or (_: _: {}))
                         (haskellOverlay ghcVer);
                     });
@@ -80,9 +120,8 @@
     // flake-utils.lib.eachSystem flake-utils.lib.allSystems (system: let
       pkgs = import nixpkgs {
         inherit system;
-        # NB: This uses `self.overlays.default` instead of `dependencies`
-        #     because packages need to be able to find other packages in this
-        #     flake as dependencies.
+        # NB: This uses `self.overlays.default` because packages need to be able
+        #     to find other packages in this flake as dependencies.
         overlays = [self.overlays.default];
       };
 
@@ -90,50 +129,13 @@
     in {
       # This package set is only useful for CI build test.
       # In practice, users will create a development environment composed by overlays.
-      packages = let
-        packagesOnGHC = ghcVer: let
-          ghcPackages = systemPackages ghcVer;
-
-          individualPackages =
-            pkgs.lib.concatMapAttrs
-            (name: value: {"${ghcVer}_${name}" = value;})
-            ghcPackages;
-
-          allEnv = pkgs.buildEnv {
-            name = "all-packages";
-            paths = [
-              (pkgs.haskell.packages.${ghcVer}.ghcWithPackages
-                (_: builtins.attrValues ghcPackages))
-            ];
-          };
-        in
-          individualPackages // {"${ghcVer}_all" = allEnv;};
-      in
+      packages =
         {default = self.packages.${system}.ghc902_all;}
-        // packagesOnGHC "ghc884"
-        // packagesOnGHC "ghc8107"
-        // packagesOnGHC "ghc902"
-        // packagesOnGHC "ghc924"
-        // packagesOnGHC "ghcHEAD";
+        // self.lib.mkPackages pkgs supportedGhcVersions systemPackages;
 
-      devShells = let
-        mkDevShell = ghcVer:
-          pkgs.haskell.packages.${ghcVer}.shellFor {
-            packages = _: builtins.attrValues (systemPackages ghcVer);
-            nativeBuildInputs = [
-              pkgs.haskell-language-server
-              pkgs.haskell.packages.${ghcVer}.cabal-install
-            ];
-            withHoogle = false;
-          };
-      in {
-        default = self.devShells.${system}.ghc902;
-        ghc884 = mkDevShell "ghc884";
-        ghc8107 = mkDevShell "ghc8107";
-        ghc902 = mkDevShell "ghc902";
-        ghc924 = mkDevShell "ghc924";
-        ghcHEAD = mkDevShell "ghcHEAD";
-      };
+      devShells =
+        {default = self.devShells.${system}.ghc902;}
+        // self.lib.mkDevShells pkgs supportedGhcVersions systemPackages;
 
       formatter = pkgs.alejandra;
     });
