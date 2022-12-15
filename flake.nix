@@ -1,13 +1,10 @@
 {
   description = "concat";
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-22.11";
-    flake-utils.url = "github:numtide/flake-utils";
-  };
+
   outputs = {
     self,
-    nixpkgs,
     flake-utils,
+    nixpkgs,
   }: let
     supportedGhcVersions = ["ghc884" "ghc8107" "ghc902" "ghc924" "ghcHEAD"];
     excludedPackages = ["concat-hardware"];
@@ -140,4 +137,9 @@
 
       formatter = pkgs.alejandra;
     });
+
+  inputs = {
+    flake-utils.url = github:numtide/flake-utils;
+    nixpkgs.url = github:NixOS/nixpkgs/nixos-22.11;
+  };
 }
