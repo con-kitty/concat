@@ -47,75 +47,7 @@
         final;
 
       ### TODO: Pull this into its own flake, for use across Haskell projects.
-      lib = {
-        mkDevShells = pkgs: ghcVersions: packages:
-          builtins.listToAttrs
-          (builtins.map
-            (ghcVer: {
-              name = ghcVer;
-              value = pkgs.haskell.packages.${ghcVer}.shellFor {
-                packages = _: builtins.attrValues (packages ghcVer);
-                nativeBuildInputs = [
-                  pkgs.haskell-language-server
-                  pkgs.haskell.packages.${ghcVer}.cabal-install
-                ];
-                withHoogle = false;
-              };
-            })
-            ghcVersions);
-
-        mkPackages = pkgs: ghcVersions: packages:
-          nixpkgs.lib.foldr
-          (a: b: a // b)
-          {}
-          (builtins.map
-            (ghcVer: let
-              ghcPackages = packages ghcVer;
-
-              individualPackages =
-                nixpkgs.lib.concatMapAttrs
-                (name: value: {"${ghcVer}_${name}" = value;})
-                ghcPackages;
-
-              allEnv = pkgs.buildEnv {
-                name = "all-packages";
-                paths = [
-                  (pkgs.haskell.packages.${ghcVer}.ghcWithPackages
-                    (_: builtins.attrValues ghcPackages))
-                ];
-              };
-            in
-              individualPackages // {"${ghcVer}_all" = allEnv;})
-            ghcVersions);
-
-        overlayHaskellPackages = ghcVersions: haskellOverlay: final: prev: {
-          haskell =
-            prev.haskell
-            // {
-              packages =
-                prev.haskell.packages
-                // builtins.zipAttrsWith
-                (name: values: builtins.head values)
-                (builtins.map
-                  (ghcVer: {
-                    "${ghcVer}" = prev.haskell.packages.${ghcVer}.override (old: {
-                      # see these issues and discussions:
-                      # - https://github.com/NixOS/nixpkgs/issues/16394
-                      # - https://github.com/NixOS/nixpkgs/issues/25887
-                      # - https://github.com/NixOS/nixpkgs/issues/26561
-                      # - https://discourse.nixos.org/t/nix-haskell-development-2020/6170
-                      overrides =
-                        nixpkgs.lib.composeExtensions
-                        (old.overrides or (_: _: {}))
-                        (haskellOverlay ghcVer);
-                    });
-                  })
-                  ghcVersions);
-            };
-        };
-
-        parseCabalProject = import ./parse-cabal-project.nix;
-      };
+      lib = import ./nix/lib.nix {inherit nixpkgs;};
     }
     // flake-utils.lib.eachSystem flake-utils.lib.allSystems (system: let
       pkgs = import nixpkgs {
