@@ -1,4 +1,30 @@
-{nixpkgs}: {
+{nixpkgs}: let
+  # Reads the set of local packages from a cabal.project provided at the call
+  # site.
+  #
+  # Ideally, parsing cabal.project should be done via official tools
+  # Related discussion at NixOS/cabal2nix#286
+  parseCabalProject = cabalProject: let
+    content = builtins.readFile cabalProject;
+    lines = nixpkgs.lib.splitString "\n" content;
+    matches =
+      builtins.map (builtins.match "^[[:space:]]*([.].*)/(.*)[.]cabal$") lines;
+  in
+    builtins.listToAttrs
+    (builtins.concatMap
+      (match:
+        if builtins.isList match && builtins.length match == 2
+        then [
+          {
+            name = builtins.elemAt match 1;
+            value = builtins.elemAt match 0;
+          }
+        ]
+        else [])
+      matches);
+in {
+  inherit parseCabalProject;
+
   # Produces a devShell for each supported GHC version.
   mkDevShells = pkgs: ghcVersions: packages:
     builtins.listToAttrs
@@ -6,7 +32,7 @@
       (ghcVer: {
         name = ghcVer;
         value = pkgs.haskell.packages.${ghcVer}.shellFor {
-          packages = _: builtins.attrValues (packages ghcVer);
+          packages = _: builtins.attrValues (packages pkgs ghcVer);
           nativeBuildInputs = [
             pkgs.haskell-language-server
             pkgs.haskell.packages.${ghcVer}.cabal-install
@@ -26,7 +52,7 @@
     {}
     (builtins.map
       (ghcVer: let
-        ghcPackages = packages ghcVer;
+        ghcPackages = packages pkgs ghcVer;
 
         individualPackages =
           nixpkgs.lib.concatMapAttrs
@@ -56,11 +82,11 @@
       // {
         packages =
           prev.haskell.packages
-          // builtins.zipAttrsWith
-          (name: values: builtins.head values)
+          // builtins.listToAttrs
           (builtins.map
             (ghcVer: {
-              "${ghcVer}" = prev.haskell.packages.${ghcVer}.override (old: {
+              name = ghcVer;
+              value = prev.haskell.packages.${ghcVer}.override (old: {
                 # see these issues and discussions:
                 # - https://github.com/NixOS/nixpkgs/issues/16394
                 # - https://github.com/NixOS/nixpkgs/issues/25887
@@ -76,29 +102,12 @@
       };
   };
 
-  # Reads the set of local packages from a cabal.project provided at the call
-  # site.
-  #
-  # Ideally, parsing cabal.project should be done via official tools
-  # Related discussion at NixOS/cabal2nix#286
-  parseCabalProject =
-    cabalProject: let
-      content = builtins.readFile cabalProject;
-      lines = nixpkgs.lib.splitString "\n" content;
-      matches =
-        builtins.map
-          (builtins.match "[[:space:]]*[.]/(.*)/(.*)[.]cabal$")
-          lines;
-      projects = builtins.concatMap (match:
-        if builtins.isList match && builtins.length match == 2
-        then [
-          {
-            name = builtins.elemAt match 1;
-            path = builtins.elemAt match 0;
-          }
-        ]
-        else [])
-        matches;
-    in
-      projects;
+  cabalProject2nix = cabalProject: pkgs: ghcVer:
+    builtins.mapAttrs
+    (name: path:
+      pkgs.haskell.packages.${ghcVer}.callCabal2nix
+      name
+      "${builtins.dirOf cabalProject}/${path}"
+      {})
+    (parseCabalProject cabalProject);
 }

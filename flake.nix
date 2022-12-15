@@ -12,38 +12,28 @@
     # need display, graphviz for testing. disable test for now.
     noCheckPackages = ["concat-graphics" "concat-plugin"];
 
-    cabalPackages =
-      builtins.filter
-      ({name, ...}: !(builtins.elem name excludedPackages))
-      (self.lib.parseCabalProject ./cabal.project);
-    nixPackages = pkgs: ghcVer: let
-      haskellLib = pkgs.haskell.lib;
-    in
-      builtins.listToAttrs
-      (builtins.map
-        ({
-          name,
-          path,
-        }: {
-          inherit name;
-          value = let
-            p = pkgs.haskell.packages.${ghcVer}.callCabal2nix name (./. + "/${path}") {};
-            p1 =
-              if builtins.elem name noHaddockPackages
-              then haskellLib.dontHaddock p
-              else p;
-          in
+    cabalPackages = pkgs: ghcVer:
+      nixpkgs.lib.concatMapAttrs
+      (name: value:
+        if builtins.elem name excludedPackages
+        then {}
+        else let
+          v1 =
+            if builtins.elem name noHaddockPackages
+            then pkgs.haskell.lib.dontHaddock value
+            else value;
+          v2 =
             if builtins.elem name noCheckPackages
-            then haskellLib.dontCheck p1
-            else p1;
-        })
-        cabalPackages);
+            then pkgs.haskell.lib.dontCheck v1
+            else v1;
+        in {"${name}" = v2;})
+      (self.lib.cabalProject2nix ./cabal.project pkgs ghcVer);
   in
     {
       overlays.default = final:
         self.lib.overlayHaskellPackages
         supportedGhcVersions
-        (ghcVer: hfinal: hprev: nixPackages final ghcVer)
+        (ghcVer: hfinal: hprev: cabalPackages final ghcVer)
         final;
 
       ### TODO: Pull this into its own flake, for use across Haskell projects.
@@ -56,18 +46,16 @@
         #     to find other packages in this flake as dependencies.
         overlays = [self.overlays.default];
       };
-
-      systemPackages = nixPackages pkgs;
     in {
       # This package set is only useful for CI build test.
       # In practice, users will create a development environment composed by overlays.
       packages =
         {default = self.packages.${system}.ghc902_all;}
-        // self.lib.mkPackages pkgs supportedGhcVersions systemPackages;
+        // self.lib.mkPackages pkgs supportedGhcVersions cabalPackages;
 
       devShells =
         {default = self.devShells.${system}.ghc902;}
-        // self.lib.mkDevShells pkgs supportedGhcVersions systemPackages;
+        // self.lib.mkDevShells pkgs supportedGhcVersions cabalPackages;
 
       formatter = pkgs.alejandra;
     });
