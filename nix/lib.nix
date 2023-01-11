@@ -1,4 +1,7 @@
-{nixpkgs}: let
+{
+  bash-strict-mode,
+  nixpkgs,
+}: let
   # Reads the set of local packages from a cabal.project provided at the call
   # site.
   #
@@ -40,14 +43,16 @@ in {
     (builtins.map
       (ghcVer: {
         name = ghcVer;
-        value = pkgs.haskell.packages.${ghcVer}.shellFor {
-          packages = _: builtins.attrValues (packages pkgs ghcVer);
-          nativeBuildInputs = [
-            pkgs.haskell-language-server
-            pkgs.haskell.packages.${ghcVer}.cabal-install
-          ];
-          withHoogle = false;
-        };
+        value =
+          bash-strict-mode.lib.checkedDrv pkgs
+          (pkgs.haskell.packages.${ghcVer}.shellFor {
+            packages = _: builtins.attrValues (packages pkgs ghcVer);
+            nativeBuildInputs = [
+              pkgs.haskell-language-server
+              pkgs.haskell.packages.${ghcVer}.cabal-install
+            ];
+            withHoogle = false;
+          });
       })
       ghcVersions);
 
@@ -67,16 +72,17 @@ in {
           nixpkgs.lib.concatMapAttrs
           (name: value: {"${ghcVer}_${name}" = value;})
           ghcPackages;
-
-        allEnv = pkgs.buildEnv {
-          name = "all-packages";
-          paths = [
-            (pkgs.haskell.packages.${ghcVer}.ghcWithPackages
-              (_: builtins.attrValues ghcPackages))
-          ];
-        };
       in
-        individualPackages // {"${ghcVer}_all" = allEnv;})
+        individualPackages
+        // {
+          "${ghcVer}_all" = pkgs.buildEnv {
+            name = "all-packages";
+            paths = [
+              (pkgs.haskell.packages.${ghcVer}.ghcWithPackages
+                (_: builtins.attrValues ghcPackages))
+            ];
+          };
+        })
       ghcVersions);
 
   # Creates an overlay with `haskellOverlay` installed in
@@ -106,9 +112,10 @@ in {
   cabalProject2nix = cabalProject: pkgs: ghcVer:
     builtins.mapAttrs
     (name: path:
-      pkgs.haskell.packages.${ghcVer}.callCabal2nix
-      name
-      "${builtins.dirOf cabalProject}/${path}"
-      {})
+      bash-strict-mode.lib.shellchecked pkgs
+      (pkgs.haskell.packages.${ghcVer}.callCabal2nix
+        name
+        "${builtins.dirOf cabalProject}/${path}"
+        {}))
     (parseCabalProject cabalProject);
 }
